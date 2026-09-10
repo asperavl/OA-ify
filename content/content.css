@@ -1,0 +1,718 @@
+/* ==========================================================================
+   OA-ify Content Stylesheet: LeetCode Assessment Mode & Crutch Blinder
+   ========================================================================== */
+
+/* ── 1. CRUTCH BLINDER ──────────────────────────────────────────────────── */
+/* Applied when body.oa-blind-crutches is present (OA Mode active)          */
+
+/* ── MASTER ORIGINAL-CONTENT HIDER ─────────────────────────────────────────
+   1. Hide ALL direct element children of the description container we didn't inject.
+   2. Collapse font-size & line-height to 0 on the container itself to silence
+      any loose TEXT NODES that aren't wrapped in an element tag (e.g. LeetCode
+      Follow-up paragraphs whose bare text leaks between tags).
+   Our HUD (.oa-hud-wrapper) and narrative (.oa-narrative-container) explicitly
+   set their own font sizes so they remain completely unaffected. */
+body.oa-blind-crutches [data-track-load="description_content"] > *:not(.oa-hud-wrapper):not(.oa-narrative-container) {
+  display: none !important;
+}
+
+body.oa-blind-crutches [data-track-load="description_content"] {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  isolation: isolate !important;
+}
+
+body.oa-blind-crutches [data-track-load="description_content"] > .oa-hud-wrapper {
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  color: #fafafa !important;
+}
+
+body.oa-blind-crutches [data-track-load="description_content"] > .oa-narrative-container {
+  font-size: 14.5px !important;
+  line-height: 1.7 !important;
+  color: #d1d5db !important;
+  isolation: isolate !important;
+}
+
+/* Tags & difficulty inside description panel */
+body.oa-blind-crutches [data-track-load="description_tag"],
+body.oa-blind-crutches [class*="topic-tag"],
+body.oa-blind-crutches [class*="tag__"],
+body.oa-blind-crutches a[href^="/tag/"],
+body.oa-blind-crutches [class*="text-difficulty"],
+body.oa-blind-crutches [class*="text-easy"],
+body.oa-blind-crutches [class*="text-medium"],
+body.oa-blind-crutches [class*="text-hard"],
+body.oa-blind-crutches [class*="text-olive"],
+body.oa-blind-crutches [class*="text-yellow"],
+body.oa-blind-crutches [class*="text-pink"],
+body.oa-blind-crutches [class*="difficulty"],
+body.oa-blind-crutches div:has(> a[href*="/tag/"]) {
+  display: none !important;
+}
+
+/* Top nav tabs — Editorial and Solutions
+   LeetCode uses FlexLayout React. Tabs are div.flexlayout__tab_button elements.
+   JS handles these precisely; this CSS is a belt-and-suspenders backup. */
+body.oa-blind-crutches .flexlayout__tab_button {
+  /* JS will hide by text content; CSS hides any leftover matching by data attr */
+}
+body.oa-blind-crutches [data-oa-nav-hidden="true"] {
+  display: none !important;
+}
+
+/* Bottom accordions — Similar Questions, Discussion, Hints, Topics, lock-icon row
+   The clickable rows use div.group.cursor-pointer regardless of location in the panel.
+   We apply globally (scoped to oa-blind-crutches body) since these rows also appear
+   outside [data-track-load="description_content"] in LeetCode's layout. */
+body.oa-blind-crutches .group.cursor-pointer {
+  display: none !important;
+}
+/* Hide parent flex-col wrapper (holds expanded accordion content + divider lines) */
+body.oa-blind-crutches .flex.flex-col:has(> .group.cursor-pointer) {
+  display: none !important;
+}
+/* Hide the grandparent container wrapping all accordion sections */
+body.oa-blind-crutches .mt-6.flex.flex-col.gap-3 {
+  display: none !important;
+}
+/* Hide the acceptance stats bar (Accepted N / Acceptance Rate N%) */
+body.oa-blind-crutches [data-track-load="description_content"] > div:has(> span),
+body.oa-blind-crutches [class*="submissionResult"],
+body.oa-blind-crutches [class*="acceptanceRate"] {
+  display: none !important;
+}
+/* Hints — belt-and-suspenders for known stable selectors */
+body.oa-blind-crutches [data-key="hints-wrapper"],
+body.oa-blind-crutches div[class*="hint-container"] {
+  display: none !important;
+}
+
+
+
+/* ── 2. INJECTED OA HUD BAR ─────────────────────────────────────────────── */
+
+.oa-hud-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin-bottom: 20px;
+  padding: 8px 12px;
+  background: rgba(24, 24, 27, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid #3f3f46;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #fafafa;
+}
+
+.oa-hud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.oa-hud-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.oa-hud-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fbbf24;
+  letter-spacing: 0.01em;
+}
+
+.oa-hud-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
+/* Segmented switch */
+.oa-segmented-switch {
+  display: inline-flex;
+  align-items: center;
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.oa-switch-btn {
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.oa-switch-btn:hover { color: #fafafa; }
+
+.oa-switch-btn.active {
+  background: #27272a;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.oa-switch-btn:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 1px;
+}
+
+/* Right actions */
+.oa-hud-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.oa-hud-action-btn {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  color: #d4d4d8;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.oa-hud-action-btn:hover:not(:disabled) {
+  background: #3f3f46;
+  color: #ffffff;
+  border-color: #52525b;
+}
+
+.oa-hud-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.oa-hud-action-btn:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 1px;
+}
+
+.oa-hud-action-btn.spinning svg {
+  animation: oa-spin 1s linear infinite;
+}
+
+@keyframes oa-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Alert banner */
+.oa-hud-alert {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 11px;
+  animation: oa-fade-in 0.2s ease;
+}
+
+.oa-hud-alert.visible { display: flex; }
+
+.oa-alert-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.oa-alert-dismiss {
+  background: none;
+  border: none;
+  color: #fca5a5;
+  cursor: pointer;
+  padding: 2px;
+  opacity: 0.7;
+}
+
+.oa-alert-dismiss:hover { opacity: 1; }
+
+@keyframes oa-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+
+/* ── 3. OA NARRATIVE TYPOGRAPHY (HackerRank-style document) ─────────────── */
+
+.oa-narrative-container {
+  color: #d1d5db;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.7;
+  animation: oa-fade-in 0.2s ease;
+}
+
+/* Generic headings (h1-h6 from markdown ##) — rarely used in our format */
+.oa-narrative-container .oa-heading {
+  color: #f4f4f5;
+  font-weight: 700;
+  margin-top: 24px;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.oa-narrative-container .oa-h1 { font-size: 18px; margin-top: 8px; }
+.oa-narrative-container .oa-h2 { font-size: 16px; }
+.oa-narrative-container .oa-h3 { font-size: 15px; }
+
+/* ── Section headings: **Bold label** lines (Problem Statement, Function Description, etc.) */
+.oa-narrative-container .oa-section-heading {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #f4f4f5;
+  margin-top: 24px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #2e2e30;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Explanation N label */
+.oa-narrative-container .oa-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a1a1aa;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+/* ── Body paragraphs */
+.oa-narrative-container .oa-paragraph {
+  margin-bottom: 12px;
+  color: #d1d5db;
+}
+
+/* ── Inline code (natural typography, zero pill badges) ─────────────────── */
+.oa-narrative-container .oa-inline-code,
+.oa-narrative-container code:not(pre code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  color: #f3f4f6 !important;
+  font-weight: 500;
+}
+
+/* ── Constraint lines: math inequalities, monospace, no bullets */
+.oa-narrative-container .oa-constraint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: #a1a1aa;
+  margin: 3px 0;
+  padding: 0;
+}
+
+/* ── Horizontal divider between sections */
+.oa-narrative-container .oa-divider {
+  border: none;
+  border-top: 1px solid #2a2a2c;
+  margin: 20px 0;
+}
+
+/* ── Generic code block (Function Contract etc.) */
+.oa-narrative-container .oa-code-block {
+  margin: 14px 0;
+  background: #111113;
+  border: 1px solid #2a2a2c;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.oa-narrative-container .oa-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #18181b;
+  border-bottom: 1px solid #2a2a2c;
+  font-size: 11px;
+}
+
+.oa-narrative-container .oa-code-lang {
+  color: #71717a;
+  text-transform: uppercase;
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.oa-narrative-container .oa-copy-btn {
+  background: transparent;
+  border: 1px solid #3f3f46;
+  color: #a1a1aa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.oa-narrative-container .oa-copy-btn:hover {
+  background: #27272a;
+  color: #fafafa;
+}
+
+.oa-narrative-container pre {
+  padding: 12px;
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #e4e4e7;
+}
+
+/* Universal reset to neutralize LeetCode global badge styling inside pre tags */
+.oa-narrative-container pre,
+.oa-sample-pre,
+.oa-sample-pre code,
+.oa-code-block pre code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  color: inherit !important;
+  font-size: inherit !important;
+}
+
+/* ── UNIFIED SAMPLE CASE CARD (HackerRank & Corporate OA fidelity) ───────── */
+/* Clean, cohesive presentation grouping Sample Input, Output, and Explanation */
+
+.oa-narrative-container .oa-sample-case {
+  margin: 16px 0;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #111113;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.oa-narrative-container .oa-sample-case-header {
+  padding: 7px 14px;
+  background: #18181b;
+  border-bottom: 1px solid #27272a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #a1a1aa;
+}
+
+.oa-narrative-container .oa-sample-section {
+  padding: 10px 14px 4px;
+}
+
+.oa-narrative-container .oa-sample-section + .oa-sample-section {
+  padding-top: 2px;
+}
+
+.oa-narrative-container .oa-sample-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #71717a;
+  margin-bottom: 5px;
+}
+
+.oa-narrative-container .oa-sample-pre {
+  background: #09090b !important;
+  border: 1px solid #202023 !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  margin: 0 0 10px 0 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e4e4e7 !important;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Integrated explanation inside the sample card */
+.oa-narrative-container .oa-sample-explanation {
+  border-top: 1px solid #202023;
+  padding: 10px 14px 12px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.oa-narrative-container .oa-sample-explanation .oa-sample-label {
+  margin-bottom: 6px;
+}
+
+.oa-narrative-container .oa-sample-explanation-text {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #d1d5db;
+}
+
+.oa-narrative-container .oa-sample-explanation-text p {
+  margin: 0 0 6px 0;
+}
+
+.oa-narrative-container .oa-sample-explanation-text p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Lists */
+.oa-narrative-container .oa-list {
+  margin: 6px 0 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.oa-narrative-container .oa-list-item { color: #d1d5db; }
+
+/* ── Blockquote (rarely used in HackerRank format) */
+.oa-narrative-container .oa-blockquote {
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  background: rgba(56, 189, 248, 0.04);
+  padding: 10px 14px;
+  margin: 12px 0;
+  border-radius: 6px;
+  color: #cbd5e1;
+}
+
+
+/* ── 4. LOADING SKELETON ────────────────────────────────────────────────── */
+
+.oa-skeleton-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.oa-skeleton-line {
+  height: 14px;
+  background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: oa-shimmer 1.5s infinite;
+}
+
+.oa-skeleton-title  { height: 24px; width: 60%; margin-bottom: 8px; }
+.oa-skeleton-sub    { height: 16px; width: 35%; margin-top: 12px; }
+
+@keyframes oa-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+
+/* ── 5. LEETCODE LIGHT MODE THEME OVERRIDES ─────────────────────────────── */
+/* Applied automatically when LeetCode is viewed in light mode (html:not(.dark)) */
+
+html:not(.dark) body.oa-blind-crutches [data-track-load="description_content"] > .oa-hud-wrapper {
+  color: #18181b !important;
+}
+
+html:not(.dark) body.oa-blind-crutches [data-track-load="description_content"] > .oa-narrative-container {
+  color: #27272a !important;
+}
+
+html:not(.dark) .oa-hud-wrapper {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #e4e4e7;
+  color: #18181b;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+html:not(.dark) .oa-segmented-switch {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+}
+
+html:not(.dark) .oa-switch-btn {
+  color: #71717a;
+}
+
+html:not(.dark) .oa-switch-btn:hover {
+  color: #18181b;
+}
+
+html:not(.dark) .oa-switch-btn.active {
+  background: #ffffff;
+  color: #18181b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+html:not(.dark) .oa-hud-action-btn {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #18181b;
+}
+
+html:not(.dark) .oa-hud-action-btn:hover {
+  background: #e4e4e7;
+}
+
+html:not(.dark) .oa-narrative-container {
+  color: #27272a;
+}
+
+html:not(.dark) .oa-narrative-container .oa-heading,
+html:not(.dark) .oa-narrative-container .oa-section-heading {
+  color: #09090b;
+  border-bottom-color: #e4e4e7;
+}
+
+html:not(.dark) .oa-narrative-container .oa-section-label {
+  color: #52525b;
+}
+
+html:not(.dark) .oa-narrative-container .oa-paragraph {
+  color: #27272a;
+}
+
+html:not(.dark) .oa-narrative-container .oa-inline-code,
+html:not(.dark) .oa-narrative-container code:not(pre code) {
+  background: transparent !important;
+  border: none !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .oa-narrative-container .oa-constraint {
+  color: #52525b;
+}
+
+html:not(.dark) .oa-narrative-container .oa-divider {
+  border-top-color: #e4e4e7;
+}
+
+html:not(.dark) .oa-narrative-container .oa-code-block {
+  background: #fafafa;
+  border-color: #e4e4e7;
+}
+
+html:not(.dark) .oa-narrative-container .oa-code-header {
+  background: #f4f4f5;
+  border-bottom-color: #e4e4e7;
+}
+
+html:not(.dark) .oa-narrative-container .oa-copy-btn {
+  border-color: #d4d4d8;
+  color: #52525b;
+}
+
+html:not(.dark) .oa-narrative-container .oa-copy-btn:hover {
+  background: #e4e4e7;
+  color: #18181b;
+}
+
+html:not(.dark) .oa-narrative-container pre {
+  color: #18181b;
+}
+
+html:not(.dark) .oa-narrative-container .oa-sample-case {
+  background: #fcfcfc;
+  border-color: #e4e4e7;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+html:not(.dark) .oa-narrative-container .oa-sample-case-header {
+  background: #f4f4f5;
+  border-bottom-color: #e4e4e7;
+  color: #52525b;
+}
+
+html:not(.dark) .oa-narrative-container .oa-sample-label {
+  color: #71717a;
+}
+
+html:not(.dark) .oa-narrative-container .oa-sample-pre {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+html:not(.dark) .oa-narrative-container .oa-sample-explanation {
+  border-top-color: #e4e4e7;
+  background: #fafafa;
+}
+
+html:not(.dark) .oa-narrative-container .oa-sample-explanation-text {
+  color: #374151;
+}
+
+html:not(.dark) .oa-narrative-container .oa-list-item {
+  color: #27272a;
+}
+
+html:not(.dark) .oa-skeleton-line {
+  background: linear-gradient(90deg, #f4f4f5 25%, #e4e4e7 50%, #f4f4f5 75%);
+}
+
+
+/* ── 6. MOTION SENSITIVITY (PREFERS-REDUCED-MOTION) ─────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .oa-narrative-container,
+  .oa-hud-alert {
+    animation: none !important;
+  }
+
+  .oa-skeleton-line {
+    animation: none !important;
+    opacity: 0.7;
+  }
+
+  .oa-switch-btn,
+  .oa-copy-btn,
+  .oa-hud-action-btn {
+    transition: none !important;
+  }
+}

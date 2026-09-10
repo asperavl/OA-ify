@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OA-ify Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="oa-popup-container">
+    <!-- Header -->
+    <header class="oa-popup-header">
+      <div class="oa-brand">
+        <div class="oa-brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+        </div>
+        <div class="oa-brand-text">
+          <h1 class="oa-title">OA-ify</h1>
+          <span class="oa-subtitle">LeetCode Assessment Mode</span>
+        </div>
+      </div>
+      <div class="oa-status-badge" id="statusBadge" aria-live="polite">
+        <span class="oa-status-dot"></span>
+        <span class="oa-status-text" id="statusText">Active</span>
+      </div>
+    </header>
+
+    <!-- Main Controls -->
+    <main class="oa-popup-main">
+      <div class="oa-control-group">
+        <!-- Master Enable Switch -->
+        <div class="oa-control-row">
+          <div class="oa-control-label">
+            <span class="oa-label-primary">Enable OA-ify</span>
+            <span class="oa-label-secondary">Blinds tags &amp; rewrites problem statements</span>
+          </div>
+          <label class="oa-switch" for="masterToggle">
+            <input type="checkbox" id="masterToggle" checked>
+            <span class="oa-slider"></span>
+          </label>
+        </div>
+
+        <!-- Auto-OA Switch -->
+        <div class="oa-control-row">
+          <div class="oa-control-label">
+            <span class="oa-label-primary">Auto-Transform on Load</span>
+            <span class="oa-label-secondary">Automatically generate OA story when opening a problem</span>
+          </div>
+          <label class="oa-switch" for="autoOaToggle">
+            <input type="checkbox" id="autoOaToggle" checked>
+            <span class="oa-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Groq API Key Section -->
+      <div class="oa-section-divider"></div>
+
+      <div class="oa-field">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+          <label for="apiKeyInput" class="oa-field-label">Groq API Key</label>
+          <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="font-size: 11px; color: var(--accent-amber); text-decoration: none; font-weight: 500;">Get Free Key ↗</a>
+        </div>
+        <div class="oa-input-group">
+          <input type="password" id="apiKeyInput" class="oa-input" placeholder="gsk_..." spellcheck="false" autocomplete="off">
+          <button type="button" class="oa-btn-icon" id="toggleKeyVisibility" title="Show API key" aria-label="Show API key" aria-pressed="false">
+            <svg id="eyeIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+        </div>
+        <button type="button" class="oa-btn-primary" id="saveKeyBtn">Save API Key</button>
+      </div>
+
+      <!-- Cache Management Section -->
+      <div class="oa-section-divider"></div>
+      
+      <div class="oa-cache-section">
+        <div class="oa-cache-info">
+          <span class="oa-cache-label">Saved Problem Stories</span>
+          <span class="oa-cache-count" id="cacheCount">0 cached</span>
+        </div>
+        <button type="button" class="oa-btn-secondary" id="clearCacheBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          <span>Clear Cache</span>
+        </button>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="oa-popup-footer">
+      <span class="oa-version">v1.0.0</span>
+      <span class="oa-tip">Keys stored locally in your browser. Free tier: 14.4k requests/day.</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Environment and Secrets
+.env
+.env.*
+*.local
+*.secret
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.impeccable/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Chrome Extension build / zip packages
+*.zip
+*.crx
+*.pem
+
+PRODUCT.md
+worker/

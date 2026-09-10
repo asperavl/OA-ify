@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Base rounded shield / terminal box -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)" stroke="#27272a" stroke-width="3"/>
+
+  <!-- Top bar subtle dots -->
+  <circle cx="28" cy="28" r="4" fill="#3f3f46"/>
+  <circle cx="42" cy="28" r="4" fill="#27272a"/>
+  <circle cx="56" cy="28" r="4" fill="#27272a"/>
+
+  <!-- Terminal prompt symbol > -->
+  <path d="M30 52 L50 68 L30 84" fill="none" stroke="url(#cyan)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Assessment lightning / badge bolt -->
+  <path d="M78 40 L62 68 L76 68 L66 96 L96 62 L82 62 Z" fill="url(#accent)"/>
+</svg>
