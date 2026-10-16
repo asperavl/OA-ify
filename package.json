@@ -1,0 +1,9 @@
+{
+  "name": "oa-ify",
+  "version": "1.0.0",
+  "description": "Chrome extension to transform LeetCode problems into Online Assessment style scenarios.",
+  "scripts": {
+    "test": "node --test test.js"
+  },
+  "license": "MIT"
+}

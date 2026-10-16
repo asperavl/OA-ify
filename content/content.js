@@ -361,20 +361,35 @@
       </div>
     `;
 
-    // Check local storage cache first
+    // Check local storage cache first with reliable validation
     const cacheKey = `lc_oa_${currentSlug}`;
     if (!forceRefresh && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       const cached = await new Promise(resolve => chrome.storage.local.get([cacheKey], resolve));
-      if (cached && cached[cacheKey]) {
-        renderStoryMarkdown(cached[cacheKey]);
-        isGenerating = false;
-        return;
+      const entry = cached ? cached[cacheKey] : null;
+
+      if (entry) {
+        // Validate cached entry before rendering
+        if (typeof entry === 'object' && entry.slug === currentSlug && typeof entry.story === 'string' && entry.story.length > 50) {
+          renderStoryMarkdown(entry.story);
+          isGenerating = false;
+          return;
+        } else if (typeof entry === 'string' && entry.length > 50) {
+          // Backward compatibility for existing simple string caches
+          renderStoryMarkdown(entry);
+          isGenerating = false;
+          return;
+        } else {
+          // Discard corrupt cache entry
+          chrome.storage.local.remove([cacheKey]);
+        }
       }
     }
 
     // Extract content from original nodes — use innerHTML to preserve sub/sup tags,
     // then strip all other HTML tags, keeping only safe math-relevant ones.
     const rawContent = extractCleanContent(cachedOriginalNodes);
+    const originalConstraints = extractOriginalConstraints(cachedOriginalNodes);
+    const originalSamples = extractOriginalSampleCases(cachedOriginalNodes);
     const title = getProblemTitle();
 
     // If user hasn't configured an API key yet, show friendly onboarding callout
@@ -394,7 +409,7 @@
       return;
     }
 
-    // Call API
+    // Call API with structured output
     const result = await OA_API.generateOANarrative({
       title: title,
       content: rawContent,
@@ -403,29 +418,185 @@
 
     isGenerating = false;
 
-    if (result.success && result.story) {
-      // Cache locally
+    if (result.success && result.storyData) {
+      // Assemble structured LLM narrative with verbatim original constraints and test cases
+      const assembledMarkdown = assembleProblemMarkdown(
+        result.storyData,
+        originalConstraints,
+        originalSamples
+      );
+
+      // Cache locally with metadata
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         const update = {};
-        update[cacheKey] = result.story;
+        update[cacheKey] = {
+          version: 2,
+          slug: currentSlug,
+          timestamp: Date.now(),
+          story: assembledMarkdown
+        };
         chrome.storage.local.set(update);
       }
-      renderStoryMarkdown(result.story);
+      renderStoryMarkdown(assembledMarkdown);
     } else {
-      // Revert skeleton and show alert (safely escape message)
+      // Revert skeleton and show graceful fallback with View Original option
       const safeMsg = OAMarkdown.escape(result.message || 'Unable to generate OA narrative.');
       narrativeContainerEl.innerHTML = `
-        <div style="padding: 24px 0; color: #a1a1aa; text-align: center;">
-          <p style="margin-bottom: 8px;">${safeMsg}</p>
-          <button type="button" class="oa-hud-action-btn" id="oaRetryBtn">Try Again</button>
+        <div style="padding: 24px 16px; color: #a1a1aa; text-align: center; background: rgba(24, 24, 27, 0.4); border: 1px solid #3f3f46; border-radius: 8px; margin: 16px 0;">
+          <p style="margin-bottom: 12px; color: #f87171;">${safeMsg}</p>
+          <div style="display: flex; gap: 8px; justify-content: center;">
+            <button type="button" class="oa-hud-action-btn" id="oaRetryBtn">Try Again</button>
+            <button type="button" class="oa-hud-action-btn" id="oaFallbackViewBtn">View Original Problem</button>
+          </div>
         </div>
       `;
       const retryBtn = document.getElementById('oaRetryBtn');
       if (retryBtn) {
         retryBtn.addEventListener('click', () => generateAndRenderStory(true));
       }
+      const fallbackBtn = document.getElementById('oaFallbackViewBtn');
+      if (fallbackBtn) {
+        fallbackBtn.addEventListener('click', () => switchView('original'));
+      }
       showAlert(result.message);
     }
+  }
+
+  /**
+   * Helper to convert HTML to text while preserving superscripts and subscripts
+   */
+  function htmlWithPowers(html) {
+    if (!html) return '';
+    return html
+      .replace(/<sup>(.*?)<\/sup>/gi, '^$1')
+      .replace(/<sub>(.*?)<\/sub>/gi, '_$1')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&le;/g, '<=')
+      .replace(/&ge;/g, '>=')
+      .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Extracts constraints verbatim from original DOM nodes, preserving powers and stripping follow-ups
+   */
+  function extractOriginalConstraints(nodes) {
+    if (!nodes || !nodes.length) return '';
+    const items = [];
+
+    for (const node of nodes) {
+      const uls = node.querySelectorAll ? node.querySelectorAll('ul') : [];
+      for (const ul of uls) {
+        const prev = ul.previousElementSibling;
+        if (prev && /constraints/i.test(prev.textContent || '')) {
+          const lis = Array.from(ul.querySelectorAll('li'));
+          for (const li of lis) {
+            const text = htmlWithPowers(li.innerHTML || li.textContent || '');
+            // Stop immediately if a Follow-up or Related Topics line is reached
+            if (/\bFollow[- ]up\b/i.test(text) || /\bRelated Topics\b/i.test(text)) {
+              break;
+            }
+            if (text) items.push(text);
+          }
+          if (items.length > 0) return items.join('\n');
+        }
+      }
+    }
+
+    // Fallback: search text across nodes, strictly stopping before Follow-up or Related Topics
+    const combinedHtml = nodes.map(n => n.innerHTML || n.textContent || '').join('\n');
+    const cleanedText = htmlWithPowers(combinedHtml);
+    const match = cleanedText.match(/Constraints:\s*([\s\S]*?)(?=(?:\bFollow[- ]up\b|\bRelated Topics\b|Example|\n\n\n|$))/i);
+    if (match && match[1].trim()) {
+      return match[1].trim()
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !/\bFollow[- ]up\b/i.test(line) && !/\bRelated Topics\b/i.test(line))
+        .join('\n');
+    }
+
+    return '';
+  }
+
+  /**
+   * Extracts original sample test cases verbatim from <pre> tags
+   */
+  function extractOriginalSampleCases(nodes) {
+    if (!nodes || !nodes.length) return '';
+    const samples = [];
+    let idx = 0;
+
+    nodes.forEach(node => {
+      const pres = node.querySelectorAll ? node.querySelectorAll('pre') : [];
+      pres.forEach(pre => {
+        const text = htmlWithPowers(pre.innerHTML || pre.textContent || '');
+        if (/Input:/i.test(text) && /Output:/i.test(text)) {
+          const inputMatch = text.match(/Input:\s*([\s\S]*?)(?=(?:Output:|$))/i);
+          const outputMatch = text.match(/Output:\s*([\s\S]*?)(?=(?:Explanation:|$))/i);
+          const explMatch = text.match(/Explanation:\s*([\s\S]*?)$/i);
+
+          const inputVal = inputMatch ? inputMatch[1].trim() : '';
+          const outputVal = outputMatch ? outputMatch[1].trim() : '';
+          const explVal = explMatch ? explMatch[1].trim() : '';
+
+          samples.push(
+            `**Sample Input ${idx}**\n\`\`\`\n${inputVal}\n\`\`\`\n` +
+            `**Sample Output ${idx}**\n\`\`\`\n${outputVal}\n\`\`\`` +
+            (explVal ? `\n\n**Explanation ${idx}**\n\n${explVal}` : '')
+          );
+          idx++;
+        }
+      });
+    });
+
+    return samples.join('\n\n---\n\n');
+  }
+
+  /**
+   * Assembles final markdown by combining LLM narrative with verbatim original constraints and test cases
+   */
+  function assembleProblemMarkdown(storyData, constraints, samples) {
+    let md = `**Problem Statement**\n\n${storyData.scenario || ''}\n\n`;
+
+    if (storyData.functionDescription) {
+      md += `---\n\n**Function Description**\n\n${storyData.functionDescription}\n\n`;
+    }
+
+    if (Array.isArray(storyData.parameters) && storyData.parameters.length > 0) {
+      md += `**Parameters**\n\n`;
+      storyData.parameters.forEach(p => {
+        md += `- \`${p.name || 'param'}\`${p.type ? ` (${p.type})` : ''}: ${p.description || ''}\n`;
+      });
+      md += `\n`;
+    }
+
+    if (storyData.returns && (storyData.returns.type || storyData.returns.description)) {
+      md += `**Returns**\n\n- \`${storyData.returns.type || 'result'}\`: ${storyData.returns.description || ''}\n\n`;
+    }
+
+    md += `---\n\n**Constraints**\n\n`;
+    if (constraints && constraints.trim()) {
+      md += constraints.split('\n')
+        .map(c => c.trim())
+        .filter(c => c && !/\bFollow[- ]up\b/i.test(c) && !/\bRelated Topics\b/i.test(c))
+        .map(c => /^[-*•]\s+/.test(c) ? c : `- ${c}`)
+        .join('\n') + `\n\n`;
+    } else {
+      md += `(Preserved from original LeetCode specification)\n\n`;
+    }
+
+    if (storyData.notes) {
+      md += `---\n\n**Note**\n\n${storyData.notes}\n\n`;
+    }
+
+    if (samples && samples.trim()) {
+      md += `---\n\n${samples}\n`;
+    }
+
+    return md;
   }
 
   /**
