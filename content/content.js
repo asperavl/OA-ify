@@ -1,10 +1,22 @@
 /**
  * OA-ify Content Script
  * Injected into leetcode.com/problems/*
- * Blinds crutches, transforms problem statements, and handles SPA navigation.
+ * - Uses LeetCode GraphQL API for clean problem data (zero DOM scraping).
+ * - Mounts HUD and narrative container strictly inside the left description panel.
+ * - Leaves the right-hand code editor, language selector, and toolbars 100% untouched.
+ * - The HUD remains pinned at the top so the user can freely toggle between "OA Scenario" and "Original".
+ * - Zero FOUC: Injects .oa-active at document_start to block raw text before the first paint.
+ * - Blinds trailing clues: Hides acceptance stats, Topics, Companies, Similar Questions, and Discussion.
  */
 (function () {
   'use strict';
+
+  // ── Immediate Zero-FOUC Guard at document_start ────────────────────────────
+  // Attach blinder classes synchronously so the CSS engine hides raw problem
+  // text and trailing clues before the browser paints the first frame.
+  if (location.pathname.startsWith('/problems/')) {
+    document.documentElement.classList.add('oa-active', 'oa-blind-crutches');
+  }
 
   let currentSlug = null;
   let isOaEnabled = true;
@@ -12,18 +24,16 @@
   let currentView = 'oa'; // 'oa' or 'original'
   let isGenerating = false;
   let userApiKey = '';
-
-  // Original DOM references
-  let cachedOriginalNodes = [];
-  let originalContainerEl = null;
-  let hudElement = null;
-  let narrativeContainerEl = null;
-
-  // Track SPA URL changes
   let lastUrl = location.href;
 
+  // DOM references within the left description container
+  let containerEl = null;
+  let hudElement = null;
+  let narrativeContainerEl = null;
+  let cachedOriginalNodes = [];
+
   /**
-   * Extract current LeetCode problem slug
+   * Extract current LeetCode problem slug from URL
    */
   function getProblemSlug() {
     const match = location.pathname.match(/\/problems\/([^\/]+)/);
@@ -31,10 +41,10 @@
   }
 
   /**
-   * Locate the problem description content container in LeetCode's DOM
+   * Locate the problem description content container in LeetCode's DOM.
+   * Uses textContent or child count so it NEVER breaks when elements are styled.
    */
   function findDescriptionContainer() {
-    // Try multiple selectors across LeetCode layout variations
     const selectors = [
       '[data-track-load="description_content"]',
       'div[data-key="description-content"]',
@@ -47,60 +57,170 @@
 
     for (const sel of selectors) {
       const el = document.querySelector(sel);
-      if (el && el.innerText && el.innerText.length > 30) {
+      if (el && (el.children.length > 0 || (el.textContent && el.textContent.trim().length > 20))) {
         return el;
       }
     }
-
     return null;
   }
 
   /**
-   * Extract problem title
+   * Polls for the description container until React mounts it
    */
-  function getProblemTitle() {
-    const titleEl = document.querySelector('[data-cy="question-title"]') ||
-                    document.querySelector('.text-title-large') ||
-                    document.querySelector('div[class*="title__"]') ||
-                    document.querySelector('h4');
-    if (titleEl && titleEl.textContent) {
-      return titleEl.textContent.trim();
-    }
-    const slug = getProblemSlug();
-    return slug ? slug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ') : 'Assessment Problem';
+  function waitForDescriptionContainer(maxRetries = 40, delayMs = 50) {
+    return new Promise(resolve => {
+      let attempts = 0;
+      function attempt() {
+        const el = findDescriptionContainer();
+        if (el) return resolve(el);
+        attempts++;
+        if (attempts >= maxRetries) return resolve(null);
+        setTimeout(attempt, delayMs);
+      }
+      attempt();
+    });
   }
 
   /**
-   * Apply or remove crutch-blinder styles on the page
+   * Helper to locate the left pane container in LeetCode's DOM
+   */
+  function getLeftPane() {
+    if (containerEl) {
+      return containerEl.closest('.flexlayout__tab') ||
+             containerEl.closest('#qd-content > div') ||
+             containerEl.parentElement?.parentElement?.parentElement ||
+             containerEl.parentElement;
+    }
+    const content = findDescriptionContainer();
+    if (content) {
+      return content.closest('.flexlayout__tab') ||
+             content.closest('#qd-content > div') ||
+             content.parentElement?.parentElement?.parentElement ||
+             content.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * Hide trailing clue elements directly after the description container
+   */
+  function hideTrailingClues() {
+    if (!containerEl) return;
+    let sibling = containerEl.nextElementSibling;
+    while (sibling) {
+      if (!sibling.classList.contains('oa-hud-wrapper') && !sibling.classList.contains('oa-narrative-container')) {
+        sibling.style.setProperty('display', 'none', 'important');
+        sibling.dataset.oaClueHidden = 'true';
+      }
+      sibling = sibling.nextElementSibling;
+    }
+    scanAndHideClues();
+  }
+
+  /**
+   * Scans the left pane for known clue accordions and cards
+   * (Topics, Companies, Similar Questions, Discussion, Hints, Acceptance stats).
+   * STRICT GUARD: NEVER hides any container that contains the HUD or problem container.
+   */
+  function scanAndHideClues() {
+    if (!isOaEnabled || currentView !== 'oa') return;
+    const leftPane = getLeftPane();
+    if (!leftPane) return;
+
+    // A. Direct Attribute Selectors for known LeetCode clue containers
+    const clueSelectors = [
+      '[data-key="hints-wrapper"]',
+      '[data-track-load*="similar"]',
+      '[data-e2e-locator="topic-tag"]',
+      '[class*="topic-tag"]',
+      'a[href*="/tag/"]',
+      'a[href*="/company/"]'
+    ];
+
+    leftPane.querySelectorAll(clueSelectors.join(',')).forEach(el => {
+      let card = el.closest('.group') || el.parentElement?.parentElement || el.parentElement;
+      if (!card || card.contains(containerEl) || (hudElement && card.contains(hudElement)) || card === leftPane) {
+        return;
+      }
+      if (!card.dataset.oaClueHidden) {
+        card.dataset.oaClueHidden = 'true';
+        card.style.setProperty('display', 'none', 'important');
+      }
+    });
+
+    // B. Text-Based Header Matching (Topics, Companies, Similar Questions, Discussion, Hints, Acceptance Rate)
+    const clueKeywords = ['topics', 'companies', 'similar questions', 'discussion', 'hint', 'acceptance rate', 'accepted '];
+
+    leftPane.querySelectorAll('div, span, p, a, button, h4, h5').forEach(el => {
+      if (el.closest('.oa-hud-wrapper') || el.closest('.oa-narrative-container')) return;
+      if (el.children.length > 2) return;
+      const rawText = el.textContent ? el.textContent.trim().toLowerCase() : '';
+      if (!rawText || rawText.length > 50) return;
+
+      const matches = clueKeywords.some(kw => {
+        if (kw === 'discussion') return rawText.startsWith('discussion');
+        if (kw === 'hint') return rawText.startsWith('hint');
+        if (kw === 'accepted ') return rawText.startsWith('accepted ');
+        if (kw === 'acceptance rate') return rawText.includes('acceptance rate');
+        return rawText === kw;
+      });
+
+      if (matches) {
+        let card = el.closest('.group') || el.parentElement?.parentElement || el.parentElement;
+
+        // STRICT INVARIANT: NEVER hide anything that contains our HUD or problem container
+        if (!card || card.contains(containerEl) || (hudElement && card.contains(hudElement)) || card === leftPane) {
+          return;
+        }
+
+        card.dataset.oaClueHidden = 'true';
+        card.style.setProperty('display', 'none', 'important');
+      }
+    });
+
+    // C. Copyright notice & feedback row
+    leftPane.querySelectorAll('div, p, span').forEach(el => {
+      if (el.closest('.oa-hud-wrapper') || el.closest('.oa-narrative-container')) return;
+      if (el.textContent && el.textContent.includes('Copyright ©') && el.textContent.includes('LeetCode')) {
+        let footer = el.parentElement || el;
+        if (!footer.contains(containerEl) && (!hudElement || !footer.contains(hudElement))) {
+          footer.dataset.oaClueHidden = 'true';
+          footer.style.setProperty('display', 'none', 'important');
+        }
+      }
+    });
+  }
+
+  /**
+   * Restore all trailing clue elements when the user toggles back to "Original"
+   */
+  function restoreTrailingClues() {
+    document.querySelectorAll('[data-oa-clue-hidden="true"]').forEach(el => {
+      el.style.removeProperty('display');
+      delete el.dataset.oaClueHidden;
+    });
+  }
+
+  /**
+   * Apply or remove crutch-blinder styles and trailing clues
    */
   function updateCrutchBlinder(blind) {
     if (blind && isOaEnabled && currentView === 'oa') {
-      document.body.classList.add('oa-blind-crutches');
-      scanAndHideByText();
+      document.documentElement.classList.add('oa-active', 'oa-blind-crutches');
+      if (document.body) document.body.classList.add('oa-active', 'oa-blind-crutches');
+      hideTrailingClues();
+      scanAndHideTabs();
     } else {
-      document.body.classList.remove('oa-blind-crutches');
-      restoreHiddenElements();
+      document.documentElement.classList.remove('oa-active', 'oa-blind-crutches');
+      if (document.body) document.body.classList.remove('oa-active', 'oa-blind-crutches');
+      restoreTrailingClues();
+      restoreHiddenTabs();
     }
   }
 
-  // Keywords for top-tab hiding (checked with .includes() — each tab has text duplicated)
   const HIDDEN_TAB_KEYWORDS = ['editorial', 'solutions'];
-  // Keywords for bottom-accordion hiding
-  const HIDDEN_ACCORDION_KEYWORDS = ['similar questions', 'discussion', 'hints', 'hint', 'topics'];
 
-  /**
-   * Hides Editorial/Solutions tabs and Similar Questions/Discussion accordions.
-   *
-   * Based on real LeetCode DOM inspection:
-   * - Tabs are `div.flexlayout__tab_button` elements (FlexLayout React library).
-   *   Each tab's textContent is duplicated (e.g. "EditorialEditorial") due to an
-   *   animation trick — so we use .includes(), not === or a Set.
-   * - Accordions are `div.group.flex.cursor-pointer.items-center.transition-colors`
-   *   elements whose textContent starts with the label. We hide both the clickable
-   *   row AND its parent flex-col wrapper (which holds expanded content).
-   */
-  function scanAndHideByText() {
-    // ── Top nav tabs ──────────────────────────────────────────────────────────
+  function scanAndHideTabs() {
     document.querySelectorAll('div.flexlayout__tab_button').forEach(tab => {
       if (tab.dataset.oaNavHidden) return;
       const txt = tab.textContent?.trim().toLowerCase() || '';
@@ -109,58 +229,17 @@
         tab.style.setProperty('display', 'none', 'important');
       }
     });
-
-    // ── Bottom accordions & header crutch buttons ─────────────────────────────
-    // The clickable header row has class `group flex cursor-pointer items-center transition-colors`
-    // We walk them and check their text content.
-    document.querySelectorAll('div.group.cursor-pointer').forEach(row => {
-      if (row.closest('#oa-hud') || row.dataset.oaHidden) return;
-      const txt = row.textContent?.trim().toLowerCase() || '';
-      // Match keyword rows AND rows with no meaningful text (e.g. lock-icon-only rows)
-      if (HIDDEN_ACCORDION_KEYWORDS.some(kw => txt.includes(kw)) || txt.length < 4) {
-        // Hide the clickable row itself
-        row.dataset.oaHidden = 'true';
-        row.style.setProperty('display', 'none', 'important');
-        // Also hide the parent wrapper (flex-col) which holds expanded content + divider
-        const wrapper = row.parentElement;
-        if (wrapper && !wrapper.closest('#oa-hud')) {
-          wrapper.dataset.oaHidden = 'true';
-          wrapper.style.setProperty('display', 'none', 'important');
-        }
-      }
-    });
-
-
-
-    // ── Acceptance stats bar (Accepted N / Acceptance Rate N%) ─────────────────
-    // This is a non-clickable div containing acceptance data — find by text content
-    const allDivs = document.querySelectorAll(
-      '[data-track-load="description_content"] > div, [data-track-load="description_content"] > *'
-    );
-    allDivs.forEach(el => {
-      if (el.closest('#oa-hud') || el.classList.contains('oa-narrative-container') || el.dataset.oaHidden) return;
-      const txt = el.textContent?.trim().toLowerCase() || '';
-      if (txt.includes('accepted') && txt.includes('acceptance rate')) {
-        el.dataset.oaHidden = 'true';
-        el.style.setProperty('display', 'none', 'important');
-      }
-    });
   }
 
-  /** Restores all elements hidden by scanAndHideByText */
-  function restoreHiddenElements() {
+  function restoreHiddenTabs() {
     document.querySelectorAll('[data-oa-nav-hidden="true"]').forEach(el => {
       el.style.removeProperty('display');
       delete el.dataset.oaNavHidden;
     });
-    document.querySelectorAll('[data-oa-hidden="true"]').forEach(el => {
-      el.style.removeProperty('display');
-      delete el.dataset.oaHidden;
-    });
   }
 
   /**
-   * Build the Injected OA HUD
+   * Builds the HUD toolbar header
    */
   function createHudElement() {
     const hud = document.createElement('div');
@@ -175,10 +254,10 @@
             <span>OA Mode Active</span>
           </div>
           <div class="oa-segmented-switch" role="tablist" aria-label="Problem presentation mode">
-            <button type="button" class="oa-switch-btn active" id="oaViewBtn" role="tab" aria-selected="true" title="View corporate engineering scenario">
+            <button type="button" class="oa-switch-btn ${currentView === 'oa' ? 'active' : ''}" id="oaViewBtn" role="tab" aria-selected="${currentView === 'oa'}">
               <span>OA Scenario</span>
             </button>
-            <button type="button" class="oa-switch-btn" id="originalViewBtn" role="tab" aria-selected="false" title="View original LeetCode text and tags">
+            <button type="button" class="oa-switch-btn ${currentView === 'original' ? 'active' : ''}" id="originalViewBtn" role="tab" aria-selected="${currentView === 'original'}">
               <span>Original</span>
             </button>
           </div>
@@ -199,22 +278,16 @@
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
-          <span id="oaAlertMsg">High assessment traffic. Please try again in a moment.</span>
+          <span id="oaAlertMsg"></span>
         </div>
         <button type="button" class="oa-alert-dismiss" id="oaAlertDismiss" aria-label="Dismiss alert">&times;</button>
       </div>
     `;
 
-    // Hook up segmented toggle
-    const oaBtn = hud.querySelector('#oaViewBtn');
-    const origBtn = hud.querySelector('#originalViewBtn');
-    const rerollBtn = hud.querySelector('#oaRerollBtn');
-    const alertDismiss = hud.querySelector('#oaAlertDismiss');
-
-    oaBtn.addEventListener('click', () => switchView('oa'));
-    origBtn.addEventListener('click', () => switchView('original'));
-    rerollBtn.addEventListener('click', () => rerollStory());
-    alertDismiss.addEventListener('click', () => hideAlert());
+    hud.querySelector('#oaViewBtn').addEventListener('click', () => switchView('oa'));
+    hud.querySelector('#originalViewBtn').addEventListener('click', () => switchView('original'));
+    hud.querySelector('#oaRerollBtn').addEventListener('click', () => rerollStory());
+    hud.querySelector('#oaAlertDismiss').addEventListener('click', () => hideAlert());
 
     return hud;
   }
@@ -230,13 +303,11 @@
 
   function hideAlert() {
     const alertBar = document.getElementById('oaAlertBar');
-    if (alertBar) {
-      alertBar.classList.remove('visible');
-    }
+    if (alertBar) alertBar.classList.remove('visible');
   }
 
   /**
-   * Switch between "OA Scenario" and "Original" LeetCode view
+   * Switch between "OA Scenario" and "Original" view without removing the HUD
    */
   function switchView(view) {
     currentView = view;
@@ -252,12 +323,11 @@
         origBtn.classList.remove('active');
         origBtn.setAttribute('aria-selected', 'false');
       }
-      updateCrutchBlinder(true);
-
       if (narrativeContainerEl) {
         narrativeContainerEl.style.display = 'block';
       }
       hideOriginalNodes();
+      updateCrutchBlinder(true);
     } else {
       if (oaBtn) {
         oaBtn.classList.remove('active');
@@ -267,12 +337,11 @@
         origBtn.classList.add('active');
         origBtn.setAttribute('aria-selected', 'true');
       }
-      updateCrutchBlinder(false);
-
       if (narrativeContainerEl) {
         narrativeContainerEl.style.display = 'none';
       }
       showOriginalNodes();
+      updateCrutchBlinder(false);
     }
   }
 
@@ -282,16 +351,6 @@
         node.style.display = 'none';
       }
     });
-
-    // Also blank out direct Text nodes in originalContainerEl to prevent unstyled text leakage
-    if (originalContainerEl) {
-      Array.from(originalContainerEl.childNodes).forEach(node => {
-        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
-          node._oaOriginalText = node.textContent;
-          node.textContent = '';
-        }
-      });
-    }
   }
 
   function showOriginalNodes() {
@@ -300,55 +359,13 @@
         node.style.display = '';
       }
     });
-
-    // Restore blanked text nodes
-    if (originalContainerEl) {
-      Array.from(originalContainerEl.childNodes).forEach(node => {
-        if (node.nodeType === Node.TEXT_NODE && typeof node._oaOriginalText === 'string') {
-          node.textContent = node._oaOriginalText;
-          delete node._oaOriginalText;
-        }
-      });
-    }
   }
 
   /**
-   * Re-roll the narrative (force fresh generation)
+   * Render loading skeleton into narrative container
    */
-  async function rerollStory() {
-    if (isGenerating || !currentSlug) return;
-    const rerollBtn = document.getElementById('oaRerollBtn');
-    if (rerollBtn) {
-      rerollBtn.disabled = true;
-      rerollBtn.classList.add('spinning');
-    }
-
-    hideAlert();
-    await generateAndRenderStory(true);
-
-    // Cooldown
-    setTimeout(() => {
-      if (rerollBtn) {
-        rerollBtn.disabled = false;
-        rerollBtn.classList.remove('spinning');
-      }
-    }, 4000);
-  }
-
-  /**
-   * Generate story via API and render into DOM
-   */
-  async function generateAndRenderStory(forceRefresh = false) {
-    if (!originalContainerEl || !currentSlug) return;
-    isGenerating = true;
-
-    // Show skeleton loader
-    if (!narrativeContainerEl) {
-      narrativeContainerEl = document.createElement('div');
-      narrativeContainerEl.className = 'oa-narrative-container';
-      originalContainerEl.appendChild(narrativeContainerEl);
-    }
-
+  function renderSkeleton() {
+    if (!narrativeContainerEl) return;
     narrativeContainerEl.innerHTML = `
       <div class="oa-skeleton-wrapper">
         <div class="oa-skeleton-line oa-skeleton-title"></div>
@@ -360,252 +377,57 @@
         <div class="oa-skeleton-line" style="width: 70%"></div>
       </div>
     `;
-
-    // Check local storage cache first with reliable validation
-    const cacheKey = `lc_oa_${currentSlug}`;
-    if (!forceRefresh && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      const cached = await new Promise(resolve => chrome.storage.local.get([cacheKey], resolve));
-      const entry = cached ? cached[cacheKey] : null;
-
-      if (entry) {
-        // Validate cached entry before rendering
-        if (typeof entry === 'object' && entry.slug === currentSlug && typeof entry.story === 'string' && entry.story.length > 50) {
-          renderStoryMarkdown(entry.story);
-          isGenerating = false;
-          return;
-        } else if (typeof entry === 'string' && entry.length > 50) {
-          // Backward compatibility for existing simple string caches
-          renderStoryMarkdown(entry);
-          isGenerating = false;
-          return;
-        } else {
-          // Discard corrupt cache entry
-          chrome.storage.local.remove([cacheKey]);
-        }
-      }
-    }
-
-    // Extract content from original nodes — use innerHTML to preserve sub/sup tags,
-    // then strip all other HTML tags, keeping only safe math-relevant ones.
-    const rawContent = extractCleanContent(cachedOriginalNodes);
-    const originalConstraints = extractOriginalConstraints(cachedOriginalNodes);
-    const originalSamples = extractOriginalSampleCases(cachedOriginalNodes);
-    const title = getProblemTitle();
-
-    // If user hasn't configured an API key yet, show friendly onboarding callout
-    if (!userApiKey) {
-      isGenerating = false;
-      narrativeContainerEl.innerHTML = `
-        <div style="padding: 32px 16px; color: #d4d4d8; text-align: center; background: rgba(24, 24, 27, 0.6); border: 1px solid #3f3f46; border-radius: 8px; margin: 16px 0;">
-          <div style="font-size: 17px; font-weight: 600; color: #fbbf24; margin-bottom: 8px;">⚡ Free Groq API Key Required</div>
-          <p style="font-size: 13.5px; color: #a1a1aa; max-width: 460px; margin: 0 auto 14px; line-height: 1.5;">
-            OA-ify needs a free Groq API key to generate corporate OA scenarios. It takes 30 seconds to get one, with no credit card required.
-          </p>
-          <div style="font-size: 12.5px; color: #71717a;">
-            👉 Click the <strong>OA-ify icon</strong> in your browser extensions toolbar to paste your key.
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    // Call API with structured output
-    const result = await OA_API.generateOANarrative({
-      title: title,
-      content: rawContent,
-      apiKey: userApiKey
-    });
-
-    isGenerating = false;
-
-    if (result.success && result.storyData) {
-      // Assemble structured LLM narrative with verbatim original constraints and test cases
-      const assembledMarkdown = assembleProblemMarkdown(
-        result.storyData,
-        originalConstraints,
-        originalSamples
-      );
-
-      // Cache locally with metadata
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        const update = {};
-        update[cacheKey] = {
-          version: 2,
-          slug: currentSlug,
-          timestamp: Date.now(),
-          story: assembledMarkdown
-        };
-        chrome.storage.local.set(update);
-      }
-      renderStoryMarkdown(assembledMarkdown);
-    } else {
-      // Revert skeleton and show graceful fallback with View Original option
-      const safeMsg = OAMarkdown.escape(result.message || 'Unable to generate OA narrative.');
-      narrativeContainerEl.innerHTML = `
-        <div style="padding: 24px 16px; color: #a1a1aa; text-align: center; background: rgba(24, 24, 27, 0.4); border: 1px solid #3f3f46; border-radius: 8px; margin: 16px 0;">
-          <p style="margin-bottom: 12px; color: #f87171;">${safeMsg}</p>
-          <div style="display: flex; gap: 8px; justify-content: center;">
-            <button type="button" class="oa-hud-action-btn" id="oaRetryBtn">Try Again</button>
-            <button type="button" class="oa-hud-action-btn" id="oaFallbackViewBtn">View Original Problem</button>
-          </div>
-        </div>
-      `;
-      const retryBtn = document.getElementById('oaRetryBtn');
-      if (retryBtn) {
-        retryBtn.addEventListener('click', () => generateAndRenderStory(true));
-      }
-      const fallbackBtn = document.getElementById('oaFallbackViewBtn');
-      if (fallbackBtn) {
-        fallbackBtn.addEventListener('click', () => switchView('original'));
-      }
-      showAlert(result.message);
-    }
   }
 
   /**
-   * Helper to convert HTML to text while preserving superscripts and subscripts
+   * Render free API key onboarding callout
    */
-  function htmlWithPowers(html) {
-    if (!html) return '';
-    return html
-      .replace(/<sup>(.*?)<\/sup>/gi, '^$1')
-      .replace(/<sub>(.*?)<\/sub>/gi, '_$1')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&le;/g, '<=')
-      .replace(/&ge;/g, '>=')
-      .replace(/&amp;/g, '&')
-      .replace(/&nbsp;/g, ' ')
-      .trim();
-  }
-
-  /**
-   * Extracts constraints verbatim from original DOM nodes, preserving powers and stripping follow-ups
-   */
-  function extractOriginalConstraints(nodes) {
-    if (!nodes || !nodes.length) return '';
-    const items = [];
-
-    for (const node of nodes) {
-      const uls = node.querySelectorAll ? node.querySelectorAll('ul') : [];
-      for (const ul of uls) {
-        const prev = ul.previousElementSibling;
-        if (prev && /constraints/i.test(prev.textContent || '')) {
-          const lis = Array.from(ul.querySelectorAll('li'));
-          for (const li of lis) {
-            const text = htmlWithPowers(li.innerHTML || li.textContent || '');
-            // Stop immediately if a Follow-up or Related Topics line is reached
-            if (/\bFollow[- ]up\b/i.test(text) || /\bRelated Topics\b/i.test(text)) {
-              break;
-            }
-            if (text) items.push(text);
-          }
-          if (items.length > 0) return items.join('\n');
-        }
-      }
-    }
-
-    // Fallback: search text across nodes, strictly stopping before Follow-up or Related Topics
-    const combinedHtml = nodes.map(n => n.innerHTML || n.textContent || '').join('\n');
-    const cleanedText = htmlWithPowers(combinedHtml);
-    const match = cleanedText.match(/Constraints:\s*([\s\S]*?)(?=(?:\bFollow[- ]up\b|\bRelated Topics\b|Example|\n\n\n|$))/i);
-    if (match && match[1].trim()) {
-      return match[1].trim()
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line && !/\bFollow[- ]up\b/i.test(line) && !/\bRelated Topics\b/i.test(line))
-        .join('\n');
-    }
-
-    return '';
-  }
-
-  /**
-   * Extracts original sample test cases verbatim from <pre> tags
-   */
-  function extractOriginalSampleCases(nodes) {
-    if (!nodes || !nodes.length) return '';
-    const samples = [];
-    let idx = 0;
-
-    nodes.forEach(node => {
-      const pres = node.querySelectorAll ? node.querySelectorAll('pre') : [];
-      pres.forEach(pre => {
-        const text = htmlWithPowers(pre.innerHTML || pre.textContent || '');
-        if (/Input:/i.test(text) && /Output:/i.test(text)) {
-          const inputMatch = text.match(/Input:\s*([\s\S]*?)(?=(?:Output:|$))/i);
-          const outputMatch = text.match(/Output:\s*([\s\S]*?)(?=(?:Explanation:|$))/i);
-          const explMatch = text.match(/Explanation:\s*([\s\S]*?)$/i);
-
-          const inputVal = inputMatch ? inputMatch[1].trim() : '';
-          const outputVal = outputMatch ? outputMatch[1].trim() : '';
-          const explVal = explMatch ? explMatch[1].trim() : '';
-
-          samples.push(
-            `**Sample Input ${idx}**\n\`\`\`\n${inputVal}\n\`\`\`\n` +
-            `**Sample Output ${idx}**\n\`\`\`\n${outputVal}\n\`\`\`` +
-            (explVal ? `\n\n**Explanation ${idx}**\n\n${explVal}` : '')
-          );
-          idx++;
-        }
-      });
-    });
-
-    return samples.join('\n\n---\n\n');
-  }
-
-  /**
-   * Assembles final markdown by combining LLM narrative with verbatim original constraints and test cases
-   */
-  function assembleProblemMarkdown(storyData, constraints, samples) {
-    let md = `**Problem Statement**\n\n${storyData.scenario || ''}\n\n`;
-
-    if (storyData.functionDescription) {
-      md += `---\n\n**Function Description**\n\n${storyData.functionDescription}\n\n`;
-    }
-
-    if (Array.isArray(storyData.parameters) && storyData.parameters.length > 0) {
-      md += `**Parameters**\n\n`;
-      storyData.parameters.forEach(p => {
-        md += `- \`${p.name || 'param'}\`${p.type ? ` (${p.type})` : ''}: ${p.description || ''}\n`;
-      });
-      md += `\n`;
-    }
-
-    if (storyData.returns && (storyData.returns.type || storyData.returns.description)) {
-      md += `**Returns**\n\n- \`${storyData.returns.type || 'result'}\`: ${storyData.returns.description || ''}\n\n`;
-    }
-
-    md += `---\n\n**Constraints**\n\n`;
-    if (constraints && constraints.trim()) {
-      md += constraints.split('\n')
-        .map(c => c.trim())
-        .filter(c => c && !/\bFollow[- ]up\b/i.test(c) && !/\bRelated Topics\b/i.test(c))
-        .map(c => /^[-*•]\s+/.test(c) ? c : `- ${c}`)
-        .join('\n') + `\n\n`;
-    } else {
-      md += `(Preserved from original LeetCode specification)\n\n`;
-    }
-
-    if (storyData.notes) {
-      md += `---\n\n**Note**\n\n${storyData.notes}\n\n`;
-    }
-
-    if (samples && samples.trim()) {
-      md += `---\n\n${samples}\n`;
-    }
-
-    return md;
-  }
-
-  /**
-   * Render markdown into narrative container
-   */
-  function renderStoryMarkdown(md) {
+  function renderOnboardingCallout() {
     if (!narrativeContainerEl) return;
-    const html = OAMarkdown.render(md);
-    narrativeContainerEl.innerHTML = html;
+    narrativeContainerEl.innerHTML = `
+      <div style="padding: 32px 16px; color: #d4d4d8; text-align: center; background: rgba(24, 24, 27, 0.6); border: 1px solid #3f3f46; border-radius: 8px; margin: 16px 0;">
+        <div style="font-size: 17px; font-weight: 600; color: #fbbf24; margin-bottom: 8px;">⚡ Free Groq API Key Required</div>
+        <p style="font-size: 13.5px; color: #a1a1aa; max-width: 460px; margin: 0 auto 14px; line-height: 1.5;">
+          OA-ify needs a free Groq API key to generate corporate OA scenarios. It takes 30 seconds to get one, with no credit card required.
+        </p>
+        <div style="font-size: 12.5px; color: #71717a;">
+          👉 Click the <strong>OA-ify icon</strong> in your browser extensions toolbar to paste your key.
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Render error state with graceful retry and switch-to-original options
+   */
+  function renderError(msg) {
+    if (!narrativeContainerEl) return;
+    const safeMsg = OAMarkdown.escape(msg || 'Unable to generate OA narrative.');
+    narrativeContainerEl.innerHTML = `
+      <div style="padding: 24px 16px; color: #a1a1aa; text-align: center; background: rgba(24, 24, 27, 0.4); border: 1px solid #3f3f46; border-radius: 8px; margin: 16px 0;">
+        <p style="margin-bottom: 12px; color: #f87171;">${safeMsg}</p>
+        <div style="display: flex; gap: 8px; justify-content: center;">
+          <button type="button" class="oa-hud-action-btn" id="oaRetryBtn">Try Again</button>
+          <button type="button" class="oa-hud-action-btn" id="oaFallbackViewBtn">View Original Problem</button>
+        </div>
+      </div>
+    `;
+
+    const retryBtn = narrativeContainerEl.querySelector('#oaRetryBtn');
+    if (retryBtn) retryBtn.addEventListener('click', () => generateAndRenderStory(true));
+
+    const fallbackBtn = narrativeContainerEl.querySelector('#oaFallbackViewBtn');
+    if (fallbackBtn) fallbackBtn.addEventListener('click', () => switchView('original'));
+
+    showAlert(msg);
+  }
+
+  /**
+   * Renders the generated markdown content inside the narrative container
+   */
+  function renderMarkdownContent(markdownText) {
+    if (!narrativeContainerEl) return;
+    narrativeContainerEl.innerHTML = OAMarkdown.render(markdownText);
 
     // Attach copy button handlers
     narrativeContainerEl.querySelectorAll('.oa-copy-btn').forEach(btn => {
@@ -623,88 +445,176 @@
   }
 
   /**
-   * Extracts clean text from the original description nodes.
-   * Uses innerHTML to preserve <sup>/<sub>, then strips remaining tags,
-   * and cuts off any Follow-up / Note / Related Topics boilerplate.
+   * Re-roll the narrative (force fresh generation from API)
    */
-  function extractCleanContent(nodes) {
-    const combined = nodes.map(n => {
-      // Get inner HTML to preserve <sup>, <sub>
-      let html = n.innerHTML || n.textContent || '';
-      // Keep <sup> and <sub> tags; strip everything else
-      html = html
-        .replace(/<sup>/gi, '{SUP}')
-        .replace(/<\/sup>/gi, '{/SUP}')
-        .replace(/<sub>/gi, '{SUB}')
-        .replace(/<\/sub>/gi, '{/SUB}')
-        .replace(/<[^>]+>/g, '') // strip all other HTML
-        .replace(/\{SUP\}/g, '<sup>')
-        .replace(/\{\/SUP\}/g, '</sup>')
-        .replace(/\{SUB\}/g, '<sub>')
-        .replace(/\{\/SUB\}/g, '</sub>')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&');
-      return html;
-    }).join('\n').trim();
-
-    // Cut off anything after "Follow up", "Follow-up", or "Related Topics"
-    // These are LeetCode-specific artifacts not relevant to the core problem
-    const cutPatterns = [
-      /\bFollow[- ]up:?\b/i,
-      /\bRelated Topics\b/i
-    ];
-    let cutIndex = combined.length;
-    for (const pattern of cutPatterns) {
-      const match = pattern.exec(combined);
-      if (match && match.index < cutIndex) {
-        cutIndex = match.index;
-      }
+  async function rerollStory() {
+    if (isGenerating || !currentSlug) return;
+    const rerollBtn = document.getElementById('oaRerollBtn');
+    if (rerollBtn) {
+      rerollBtn.disabled = true;
+      rerollBtn.classList.add('spinning');
     }
 
-    return combined.slice(0, cutIndex).trim();
+    hideAlert();
+    await generateAndRenderStory(true);
+
+    setTimeout(() => {
+      if (rerollBtn) {
+        rerollBtn.disabled = false;
+        rerollBtn.classList.remove('spinning');
+      }
+    }, 3000);
+  }
+
+  const CACHE_SCHEMA_VERSION = 3;
+
+  /**
+   * Validates cached story against schema version and corruption heuristics.
+   */
+  function isCacheValid(entry, slug) {
+    if (!entry || typeof entry !== 'object') return false;
+    if (entry.version !== CACHE_SCHEMA_VERSION) return false;
+    if (entry.slug !== slug) return false;
+    if (!entry.story || typeof entry.story !== 'string' || entry.story.length < 50) return false;
+    // Discard any historical corrupted entries with unescaped \n\n, broken powers, or int[] types
+    if (entry.story.includes('\\n\\n') || /\b104\b/.test(entry.story) || /\b-109\b/.test(entry.story) || /\(int\[\]\)/.test(entry.story)) {
+      return false;
+    }
+    return true;
   }
 
   /**
-   * Initialize OA-ify on current problem page
+   * Fetches problem via GraphQL, calls Groq, and renders the OA scenario
+   */
+  async function generateAndRenderStory(forceRefresh = false) {
+    if (!containerEl || !currentSlug) return;
+    const cacheKey = `lc_oa_${currentSlug}`;
+
+    // 1. Check local storage cache first
+    if (!forceRefresh && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const cached = await new Promise(r => chrome.storage.local.get([cacheKey], r));
+      const entry = cached ? cached[cacheKey] : null;
+
+      if (entry) {
+        if (isCacheValid(entry, currentSlug)) {
+          renderMarkdownContent(entry.story);
+          return;
+        } else {
+          chrome.storage.local.remove([cacheKey]);
+        }
+      }
+    }
+
+    // 2. Show skeleton while generating
+    renderSkeleton();
+
+    // 3. Verify user API key
+    if (!userApiKey) {
+      renderOnboardingCallout();
+      return;
+    }
+
+    isGenerating = true;
+
+    // 4. Fetch clean problem data directly from LeetCode GraphQL API
+    const problem = await OA_API.fetchLeetCodeProblem(currentSlug);
+    if (!problem || !problem.content) {
+      isGenerating = false;
+      renderError('Could not retrieve problem details from LeetCode. Please check your network.');
+      return;
+    }
+
+    // 5. Extract verbatim invariants directly from GraphQL HTML
+    const originalConstraints = OA_API.extractConstraintsFromHtml(problem.content);
+    const originalSamples = OA_API.extractSampleCasesFromHtml(problem.content);
+    const cleanContent = OA_API.cleanProblemHtml(problem.content);
+
+    // 6. Call Groq AI to generate corporate engineering narrative
+    const result = await OA_API.generateOANarrative({
+      title: problem.title,
+      content: cleanContent,
+      apiKey: userApiKey
+    });
+
+    isGenerating = false;
+
+    if (result.success && result.storyData) {
+      const assembledMarkdown = OA_API.assembleProblemMarkdown(
+        result.storyData,
+        originalConstraints,
+        originalSamples
+      );
+
+      // Save to local cache
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          [cacheKey]: {
+            version: CACHE_SCHEMA_VERSION,
+            slug: currentSlug,
+            timestamp: Date.now(),
+            story: assembledMarkdown
+          }
+        });
+      }
+
+      renderMarkdownContent(assembledMarkdown);
+    } else {
+    }
+  }
+
+  /**
+   * Main page initialization entry point
    */
   async function initProblemPage() {
     const slug = getProblemSlug();
     if (!slug) return;
 
-    // Bail early only if this exact slug is already fully mounted
-    // (guard against double-fire from MutationObserver bursts)
-    if (slug === currentSlug && document.getElementById('oa-hud')) return;
-
-    currentSlug = slug;
-    currentView = 'oa';
-    narrativeContainerEl = null; // force fresh narrative node for new problem
-
-    // Retry finding the description container — React may not have mounted it yet
-    const container = await waitForDescriptionContainer(8, 350);
+    // Wait for the description container to appear in the DOM
+    const container = await waitForDescriptionContainer(40, 50);
     if (!container) {
-      console.warn('[OA-ify] Description container not found after retries, skipping.');
+      console.warn('[OA-ify] Description container not found after retries.');
       return;
     }
 
-    originalContainerEl = container;
+    // If already mounted for this slug, return early
+    if (slug === currentSlug && document.getElementById('oa-hud')) return;
 
-    // Cache original children nodes (exclude any OA elements we injected)
+    currentSlug = slug;
+    containerEl = container;
+    currentView = 'oa';
+
+    // Cache original children nodes
     cachedOriginalNodes = Array.from(container.children).filter(
       c => !c.classList.contains('oa-hud-wrapper') && !c.classList.contains('oa-narrative-container')
     );
 
-    // Inject HUD bar at the top if not present
+    // Inject HUD toolbar at the top of the description container (if not present)
     if (!document.getElementById('oa-hud')) {
       hudElement = createHudElement();
       container.insertBefore(hudElement, container.firstChild);
+    } else {
+      hudElement = document.getElementById('oa-hud');
     }
 
-    updateCrutchBlinder(true);
-    hideOriginalNodes();
+    // Inject narrative container right after HUD (if not present)
+    if (!container.querySelector('.oa-narrative-container')) {
+      narrativeContainerEl = document.createElement('div');
+      narrativeContainerEl.className = 'oa-narrative-container';
+      container.appendChild(narrativeContainerEl);
+    } else {
+      narrativeContainerEl = container.querySelector('.oa-narrative-container');
+    }
 
-    // Check if auto load enabled
+    // Handle view state
+    if (!isOaEnabled) {
+      switchView('original');
+      if (hudElement) hudElement.style.display = 'none';
+      return;
+    }
+
+    if (hudElement) hudElement.style.display = '';
+    switchView('oa');
+
     if (isAutoLoadEnabled) {
       await generateAndRenderStory(false);
     } else {
@@ -713,45 +623,28 @@
   }
 
   /**
-   * Polls for the description container up to `maxRetries` times,
-   * waiting `delayMs` between attempts. Returns the element or null.
-   */
-  function waitForDescriptionContainer(maxRetries, delayMs) {
-    return new Promise(resolve => {
-      let attempts = 0;
-      function attempt() {
-        const el = findDescriptionContainer();
-        if (el) return resolve(el);
-        attempts++;
-        if (attempts >= maxRetries) return resolve(null);
-        setTimeout(attempt, delayMs);
-      }
-      attempt();
-    });
-  }
-
-  /**
-   * Tears down all OA-ify state for the current problem.
-   * Called when the URL changes before a new problem mounts.
+   * Tears down problem-specific state on navigation
    */
   function resetState() {
-    // Remove injected HUD from DOM if it's still attached
     const existingHud = document.getElementById('oa-hud');
     if (existingHud) existingHud.remove();
 
-    // Remove injected narrative container
     if (narrativeContainerEl && narrativeContainerEl.parentNode) {
       narrativeContainerEl.remove();
     }
 
-    // Restore any hidden original nodes
-    restoreHiddenElements();
-    document.body.classList.remove('oa-blind-crutches');
+    // Only restore native view if OA mode was actually turned off by the user
+    if (!isOaEnabled) {
+      showOriginalNodes();
+      restoreTrailingClues();
+      restoreHiddenTabs();
+      document.documentElement.classList.remove('oa-active', 'oa-blind-crutches');
+      if (document.body) document.body.classList.remove('oa-active', 'oa-blind-crutches');
+    }
 
-    // Clear all state references
     hudElement = null;
     narrativeContainerEl = null;
-    originalContainerEl = null;
+    containerEl = null;
     cachedOriginalNodes = [];
     currentSlug = null;
     isGenerating = false;
@@ -767,6 +660,10 @@
         isOaEnabled = res.oa_enabled !== false;
         isAutoLoadEnabled = res.oa_auto_load !== false;
         userApiKey = res.oa_api_key || '';
+        if (!isOaEnabled) {
+          document.documentElement.classList.remove('oa-active', 'oa-blind-crutches');
+          if (document.body) document.body.classList.remove('oa-active', 'oa-blind-crutches');
+        }
         if (callback) callback();
       });
     } else {
@@ -785,6 +682,9 @@
         } else {
           if (hudElement) hudElement.style.display = '';
           switchView('oa');
+          if (narrativeContainerEl && (!narrativeContainerEl.innerHTML || narrativeContainerEl.innerHTML.trim() === '')) {
+            generateAndRenderStory(false);
+          }
         }
       } else if (msg.type === 'OA_AUTO_LOAD_CHANGED') {
         isAutoLoadEnabled = msg.autoLoad;
@@ -803,8 +703,6 @@
   }
 
   // ── SPA Navigation Detection ─────────────────────────────────────────────
-  // Intercept pushState/replaceState (used by React Router for SPA navigation)
-  // so we get an immediate signal when LeetCode navigates to a new problem.
   (function patchHistory() {
     const wrap = (original) => function (...args) {
       const result = original.apply(this, args);
@@ -823,31 +721,36 @@
     if (newHref === lastUrl) return;
     lastUrl = newHref;
 
-    if (!location.pathname.startsWith('/problems/') || !isOaEnabled) return;
+    const newSlug = getProblemSlug();
+    if (!newSlug) {
+      resetState();
+      return;
+    }
 
-    // Tear down old problem state immediately
-    resetState();
-
-    // Delay init to give React time to mount the new problem's DOM
-    setTimeout(() => {
-      if (location.pathname.startsWith('/problems/') && isOaEnabled) {
-        initProblemPage();
-      }
-    }, 1000);
-  });
-
-  // MutationObserver as a secondary fallback for initial page loads and
-  // edge cases where pushState isn't intercepted in time
-  const observer = new MutationObserver(() => {
-    if (!location.pathname.startsWith('/problems/') || !isOaEnabled) return;
-    if (!document.getElementById('oa-hud') && getProblemSlug() && getProblemSlug() !== currentSlug) {
-      // Debounce: use a short timeout to let DOM settle
-      clearTimeout(observer._debounce);
-      observer._debounce = setTimeout(initProblemPage, 600);
+    if (newSlug !== currentSlug) {
+      resetState();
+      initProblemPage();
     }
   });
 
-  observer.observe(document.body || document.documentElement, {
+  // Observer to detect container when navigating and continuously hide lazily-loaded clues
+  const observer = new MutationObserver(() => {
+    if (!location.pathname.startsWith('/problems/') || !isOaEnabled) return;
+    const slug = getProblemSlug();
+    if (slug && !document.getElementById('oa-hud') && findDescriptionContainer()) {
+      clearTimeout(observer._debounce);
+      observer._debounce = setTimeout(initProblemPage, 40);
+    }
+    if (currentView === 'oa') {
+      clearTimeout(observer._clueDebounce);
+      observer._clueDebounce = setTimeout(() => {
+        scanAndHideClues();
+        scanAndHideTabs();
+      }, 100);
+    }
+  });
+
+  observer.observe(document.documentElement, {
     childList: true,
     subtree: true
   });
@@ -855,7 +758,7 @@
   // Initial load
   loadPreferences(() => {
     if (location.pathname.startsWith('/problems/') && isOaEnabled) {
-      setTimeout(initProblemPage, 900);
+      initProblemPage();
     }
   });
 })();

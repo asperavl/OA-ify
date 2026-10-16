@@ -1,92 +1,58 @@
 /* ==========================================================================
-   OA-ify Content Stylesheet: LeetCode Assessment Mode & Crutch Blinder
+   OA-ify Content Stylesheet: LeetCode Assessment Mode & Scoped HUD
    ========================================================================== */
 
-/* ── 1. CRUTCH BLINDER ──────────────────────────────────────────────────── */
-/* Applied when body.oa-blind-crutches is present (OA Mode active)          */
+/* ── 1. NARRATIVE CONTAINER ─────────────────────────────────────────────── */
+.oa-narrative-container {
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #d1d5db;
+  margin-top: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
 
-/* ── MASTER ORIGINAL-CONTENT HIDER ─────────────────────────────────────────
-   1. Hide ALL direct element children of the description container we didn't inject.
-   2. Collapse font-size & line-height to 0 on the container itself to silence
-      any loose TEXT NODES that aren't wrapped in an element tag (e.g. LeetCode
-      Follow-up paragraphs whose bare text leaks between tags).
-   Our HUD (.oa-hud-wrapper) and narrative (.oa-narrative-container) explicitly
-   set their own font sizes so they remain completely unaffected. */
+/* ── 2. ZERO-FOUC & CRUTCH BLINDER (Strictly scoped to left description pane) ─ */
+/* 2a. Instantly hide raw LeetCode problem text the millisecond React mounts it */
+html.oa-active [data-track-load="description_content"] > *:not(.oa-hud-wrapper):not(.oa-narrative-container),
+body.oa-active [data-track-load="description_content"] > *:not(.oa-hud-wrapper):not(.oa-narrative-container),
+html.oa-blind-crutches [data-track-load="description_content"] > *:not(.oa-hud-wrapper):not(.oa-narrative-container),
 body.oa-blind-crutches [data-track-load="description_content"] > *:not(.oa-hud-wrapper):not(.oa-narrative-container) {
   display: none !important;
 }
 
-body.oa-blind-crutches [data-track-load="description_content"] {
-  font-size: 0 !important;
-  line-height: 0 !important;
-  color: transparent !important;
-  isolation: isolate !important;
-}
-
-body.oa-blind-crutches [data-track-load="description_content"] > .oa-hud-wrapper {
-  font-size: 13px !important;
-  line-height: 1.4 !important;
-  color: #fafafa !important;
-}
-
-body.oa-blind-crutches [data-track-load="description_content"] > .oa-narrative-container {
-  font-size: 14.5px !important;
-  line-height: 1.7 !important;
-  color: #d1d5db !important;
-  isolation: isolate !important;
-}
-
-/* Tags & difficulty inside description panel */
-body.oa-blind-crutches [data-track-load="description_tag"],
-body.oa-blind-crutches [class*="topic-tag"],
-body.oa-blind-crutches [class*="tag__"],
-body.oa-blind-crutches a[href^="/tag/"],
-body.oa-blind-crutches [class*="text-difficulty"],
-body.oa-blind-crutches [class*="text-easy"],
-body.oa-blind-crutches [class*="text-medium"],
-body.oa-blind-crutches [class*="text-hard"],
-body.oa-blind-crutches [class*="text-olive"],
-body.oa-blind-crutches [class*="text-yellow"],
-body.oa-blind-crutches [class*="text-pink"],
-body.oa-blind-crutches [class*="difficulty"],
-body.oa-blind-crutches div:has(> a[href*="/tag/"]) {
+/* 2b. Instantly hide all trailing sibling clues in the left pane (acceptance stats, topics, companies, similar questions, discussion, hints, copyright) */
+html.oa-active [data-track-load="description_content"] ~ *,
+body.oa-active [data-track-load="description_content"] ~ *,
+html.oa-blind-crutches [data-track-load="description_content"] ~ *,
+body.oa-blind-crutches [data-track-load="description_content"] ~ * {
   display: none !important;
 }
 
-/* Top nav tabs — Editorial and Solutions
-   LeetCode uses FlexLayout React. Tabs are div.flexlayout__tab_button elements.
-   JS handles these precisely; this CSS is a belt-and-suspenders backup. */
-body.oa-blind-crutches .flexlayout__tab_button {
-  /* JS will hide by text content; CSS hides any leftover matching by data attr */
-}
+/* 2c. Hide editorial / solution tabs flagged by JS */
+html.oa-active [data-oa-nav-hidden="true"],
+body.oa-active [data-oa-nav-hidden="true"],
+html.oa-blind-crutches [data-oa-nav-hidden="true"],
 body.oa-blind-crutches [data-oa-nav-hidden="true"] {
   display: none !important;
 }
 
-/* Bottom accordions — Similar Questions, Discussion, Hints, Topics, lock-icon row
-   The clickable rows use div.group.cursor-pointer regardless of location in the panel.
-   We apply globally (scoped to oa-blind-crutches body) since these rows also appear
-   outside [data-track-load="description_content"] in LeetCode's layout. */
-body.oa-blind-crutches .group.cursor-pointer {
-  display: none !important;
-}
-/* Hide parent flex-col wrapper (holds expanded accordion content + divider lines) */
-body.oa-blind-crutches .flex.flex-col:has(> .group.cursor-pointer) {
-  display: none !important;
-}
-/* Hide the grandparent container wrapping all accordion sections */
-body.oa-blind-crutches .mt-6.flex.flex-col.gap-3 {
-  display: none !important;
-}
-/* Hide the acceptance stats bar (Accepted N / Acceptance Rate N%) */
-body.oa-blind-crutches [data-track-load="description_content"] > div:has(> span),
-body.oa-blind-crutches [class*="submissionResult"],
-body.oa-blind-crutches [class*="acceptanceRate"] {
-  display: none !important;
-}
-/* Hints — belt-and-suspenders for known stable selectors */
-body.oa-blind-crutches [data-key="hints-wrapper"],
-body.oa-blind-crutches div[class*="hint-container"] {
+/* 2d. Hide difficulty badges, tags & hints strictly within problem description area */
+html.oa-active [data-track-load="description_tag"],
+body.oa-active [data-track-load="description_tag"],
+html.oa-blind-crutches [data-track-load="description_tag"],
+body.oa-blind-crutches [data-track-load="description_tag"],
+html.oa-active [class*="topic-tag"],
+body.oa-active [class*="topic-tag"],
+html.oa-blind-crutches [class*="topic-tag"],
+body.oa-blind-crutches [class*="topic-tag"],
+html.oa-active [class*="text-difficulty"],
+body.oa-active [class*="text-difficulty"],
+html.oa-blind-crutches [class*="text-difficulty"],
+body.oa-blind-crutches [class*="text-difficulty"],
+html.oa-active [data-key="hints-wrapper"],
+body.oa-active [data-key="hints-wrapper"],
+html.oa-blind-crutches [data-key="hints-wrapper"],
+body.oa-blind-crutches [data-key="hints-wrapper"] {
   display: none !important;
 }
 
